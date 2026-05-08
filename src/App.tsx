@@ -21,7 +21,7 @@ import {
 } from "recharts";
 
 const SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbzCwRB88SksxFMDiwjO88moV6BskC1i1oTEUFjIDkzL-fIcNY6YEHgE5rArjPPXcts/exec";
+  "https://script.google.com/macros/s/AKfycbzDHorRL5r6oPuLdOpnz22ObUCS8FHkza0wgbleD2MoKAaKGj5MZT7T1pODAfl7bgzi/exec";
 
 const DEFAULT_TARGETS = {
   totalWealth: 5000000,
@@ -31,9 +31,10 @@ const DEFAULT_TARGETS = {
   annualDividend: 200000,
 };
 
-const DEFAULT_TARGET_ALLOCATION = {
-  Dividend: 40,
-  Growth: 60,
+const DEFAULT_PHASES = {
+  Build: { dividendPct: 40, growthPct: 60, monthlyGrowth: 15000 },
+  Accumulate: { dividendPct: 50, growthPct: 50, monthlyGrowth: 15000 },
+  Income: { dividendPct: 70, growthPct: 30, monthlyGrowth: 15000 },
 };
 
 const EMPTY_HOLDING = {
@@ -216,13 +217,16 @@ function CTip(props: any) {
 
 function App() {
   const [tab, setTab] = useState("dashboard");
+  const [phase, setPhase] = useState("Build");
   const [holdings, setHoldings] = useState(
     Array(18)
       .fill(null)
       .map(() => ({ ...EMPTY_HOLDING }))
   );
   const [targets, setTargets] = useState({ ...DEFAULT_TARGETS });
+  const [phases, setPhases] = useState({ ...DEFAULT_PHASES });
   const [cash, setCash] = useState(0);
+  const [maxBudget, setMaxBudget] = useState(5000);
   const [portfolioName, setPortfolioName] = useState("");
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -240,6 +244,9 @@ function App() {
   const [summary, setSummary] = useState({
     lastUpdate: "",
     lineAvailable: 0,
+    maxBudget: 0,
+    effectiveBudget: 0,
+    phase: "BUILD",
     totalBuyNeed: 0,
     growthSell: 0,
     remainingNeed: 0,
@@ -296,6 +303,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
       const apiSellOrders = data.sellAlerts || data.sellOrders || [];
       const apiBuyOrders = data.buyOrders || [];
       const apiDecisionAnalytics = data.decisionAnalytics || { trend: [], status: [] };
+      const apiPhaseControl = data.phaseControl || {};
 
       setPortfolioName(
         apiSummary.portfolioName || data.portfolioName || "Portfolio OS"
@@ -308,11 +316,22 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
         apiSummary.cash ??
         0;
 
+      const portfolioPhase =
+        apiSummary.phase ||
+        apiSummary.portfolioPhase ||
+        apiSummary.portfolio_phase ||
+        apiPhaseControl.portfolioPhase ||
+        "Build";
+
       setSummary({
         ...apiSummary,
         portfolioValue:
           apiSummary.portfolioValue ?? apiSummary.portfolio_value ?? 0,
         lineAvailable,
+        maxBudget: apiSummary.maxBudget ?? apiSummary.max_budget ?? 5000,
+        effectiveBudget:
+          apiSummary.effectiveBudget ?? apiSummary.effective_budget ?? 0,
+        phase: portfolioPhase,
         dividendAllocation:
           apiSummary.dividendAllocation ?? apiSummary.dividend_allocation ?? 0,
         growthAllocation:
@@ -321,6 +340,48 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
       });
 
       setCash(num(lineAvailable));
+      setMaxBudget(num(apiSummary.maxBudget ?? apiSummary.max_budget ?? 5000));
+
+      const rawPhase = String(portfolioPhase).trim().toUpperCase();
+
+      const phaseMap = {
+        BUILD: "Build",
+        ACCUMULATE: "Accumulate",
+        INCOMEFOCUS: "Income",
+        "INCOME FOCUS": "Income",
+        INCOME: "Income",
+      };
+      setPhase((phaseMap as any)[rawPhase] || portfolioPhase || "Build");
+
+      if (Array.isArray(apiPhaseControl.phases)) {
+        const nextPhases = { ...DEFAULT_PHASES };
+        apiPhaseControl.phases.forEach((p: any) => {
+          const name = String(p.phase || "").trim();
+          if (!name) return;
+          const dividendPct =
+            num(p.dividend) <= 1 ? num(p.dividend) * 100 : num(p.dividend);
+          const growthPct =
+            num(p.growth) <= 1 ? num(p.growth) * 100 : num(p.growth);
+          const phaseKeyMap = {
+            BUILD: "Build",
+            ACCUMULATE: "Accumulate",
+            INCOME: "Income",
+            INCOMEFOCUS: "Income",
+            "INCOME FOCUS": "Income",
+          };
+          const key =
+  (phaseKeyMap as any)[name.toUpperCase().replace(/\s+/g, " ")] || name;
+
+(nextPhases as any)[key] = {
+  ...((nextPhases as any)[key] || {}),
+  dividendPct,
+  growthPct,
+  monthlyGrowth: (nextPhases as any)[key]?.monthlyGrowth || 15000,
+};
+        });
+        setPhases(nextPhases);
+      }
+
       if (data.targets) {
         setTargets((prev) => ({
           ...prev,
@@ -354,10 +415,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
             source: type,
             units: h.units ?? h.currentUnits ?? "",
             avgCost: h.avgCost ?? "",
-            targetWeight:
-              h.targetWeight === "" || h.targetWeight === undefined || h.targetWeight === null
-                ? ""
-                : Number(targetPct(h.targetWeight)).toFixed(2),
+            targetWeight: h.targetWeight ?? "",
             price: h.price ?? h.marketPrice ?? "",
           };
         });
@@ -477,28 +535,12 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
   const totalCost = computed.reduce((s, h) => s + h.cost, 0);
   const totalGLPct = totalCost > 0 ? (totalGL / totalCost) * 100 : 0;
 
+  const phaseData = phases[phase] || phases.Build;
   const divPct = equityValue > 0 ? (divValue / equityValue) * 100 : 0;
   const growPct = equityValue > 0 ? (growValue / equityValue) * 100 : 0;
-
-  const targetWeightTotals = useMemo(() => {
-    const totals = { Dividend: 0, Growth: 0 };
-
-    holdings.forEach((h) => {
-      const type = normalizeHoldingType(h.type);
-      const weight = targetPct(h.targetWeight);
-
-      if (type === "Dividend" || type === "Growth") {
-        totals[type] += weight;
-      }
-    });
-
-    const hasUserTarget = holdings.some((h) => targetPct(h.targetWeight) > 0);
-    return hasUserTarget ? totals : { ...DEFAULT_TARGET_ALLOCATION };
-  }, [holdings]);
-
-  const divGap = divPct - targetWeightTotals.Dividend;
-  const growGap = growPct - targetWeightTotals.Growth;
-  const needRebal = equityValue > 0 && Math.abs(divGap) > 5;
+  const divGap = divPct - phaseData.dividendPct;
+  const growGap = growPct - phaseData.growthPct;
+  const needRebal = Math.abs(divGap) > 5;
 
   const totalBuyCash = num(
     summary.totalBuyNeed ?? summary.total_buy_need ?? summary.buyNeed
@@ -533,6 +575,39 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
     }
 
     setHoldings((h) => h.filter((_, idx) => idx !== i));
+  };
+
+  const savePortfolioPhase = async (nextPhase) => {
+    try {
+      setPhase(nextPhase);
+      setLoading(true);
+      setLoadError("");
+
+      const res = await fetch(SCRIPT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "saveSettings",
+          portfolioPhase: nextPhase,
+        }),
+      });
+
+      const result = await res.json();
+
+      if (!result.success) {
+        throw new Error(result.message || "Save phase failed");
+      }
+
+      await loadPortfolioFromSheet();
+    } catch (err: any) {
+      console.error("Phase save error:", err);
+      setLoadError(err.message || "Phase save error");
+      alert(`Save phase failed: ${err.message || "Unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getHoldingAvgCost = (symbol) => {
@@ -723,18 +798,28 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
       const settingsPayload = {
         action: "saveSettings",
         portfolioName: portfolioName,
+        portfolioPhase: phase,
         lineAvailable: Number(cash) || 0,
+        maxBudget: Number(maxBudget) || 0,
         targets: {
           totalWealth: num(targets.totalWealth),
           dividendValue: num(targets.dividendValue),
           growthValue: num(targets.growthValue),
         },
+        phaseControl: Object.entries(phases).map(([phaseName, values]) => ({
+          phase: phaseName,
+          dividend: (Number(values.dividendPct) || 0) / 100,
+          growth: (Number(values.growthPct) || 0) / 100,
+        })),
       };
 
       const portfolioPayload = {
         action: "savePortfolio",
         portfolio: holdings
-          .filter((h) => String(h.symbol || "").trim())
+          .filter((h) => {
+            const symbol = String(h.symbol || "").trim().toUpperCase();
+            return symbol && symbol !== "SYMBOL";
+          })
           .map((h) => ({
             assetCode: String(h.symbol || "")
               .trim()
@@ -745,6 +830,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
             units: h.units === "" ? "" : Number(h.units),
             avgCost: h.avgCost === "" ? "" : Number(h.avgCost),
             targetWeight: h.targetWeight === "" ? "" : targetPct(h.targetWeight),
+            note: h.note || "",
           })),
       };
 
@@ -836,7 +922,9 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
       const payload = {
         action: "saveSettings",
         portfolioName: portfolioName,
+        portfolioPhase: phase,
         lineAvailable: Number(cash) || 0,
+        maxBudget: Number(maxBudget) || 0,
 
         // Keep original nested structure
         targets: progressTargets,
@@ -916,16 +1004,30 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
     { name: "Growth", value: growValue },
   ];
 
+  const targetWeightTotals = useMemo(() => {
+    const totals = { Dividend: 0, Growth: 0 };
+
+    holdings.forEach((h) => {
+      const type = normalizeHoldingType(h.type);
+      const weight = targetPct(h.targetWeight);
+
+      if (type === "Dividend") totals.Dividend += weight;
+      if (type === "Growth") totals.Growth += weight;
+    });
+
+    const hasUserTarget = holdings.some((h) => targetPct(h.targetWeight) > 0);
+    return hasUserTarget ? totals : { Dividend: 40, Growth: 60 };
+  }, [holdings]);
 
   const targetCoverageCards = [
     {
-      label: "Dividend Target Allocation",
+      label: "Dividend Target Weight",
       total: targetWeightTotals.Dividend,
       color: "#34d399",
       subtitle: "From your portfolio target",
     },
     {
-      label: "Growth Target Allocation",
+      label: "Growth Target Weight",
       total: targetWeightTotals.Growth,
       color: "#60a5fa",
       subtitle: "From your portfolio target",
@@ -1194,7 +1296,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 marginLeft: 2,
               }}
             >
-              Advance v1.0
+              v3.3
             </span>
           )}
         </div>
@@ -1268,17 +1370,38 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
               padding: isMobile ? "5px 8px" : "6px 12px",
             }}
           >
-            <span
+            {!isMobile && (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "#7d8ea5",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                  fontWeight: 700,
+                }}
+              >
+                Phase
+              </span>
+            )}
+            <select
+              value={phase}
+              onChange={(e) => savePortfolioPhase(e.target.value)}
               style={{
-                fontSize: isMobile ? 11 : 12,
+                background: "transparent",
+                border: "none",
                 color: "#60a5fa",
-                fontWeight: 800,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
+                fontSize: isMobile ? 12 : 13,
+                fontWeight: 700,
+                fontFamily: "'Inter', sans-serif",
+                outline: "none",
+                cursor: "pointer",
+                maxWidth: isMobile ? 92 : "none",
               }}
             >
-              Advance
-            </span>
+              <option value="Build">🏗️ Build</option>
+              <option value="Accumulate">📦 Accumulate</option>
+              <option value="Income">💰 Income</option>
+            </select>
           </div>
           {!isMobile && (
             <>
@@ -1367,12 +1490,12 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                   <span
                     style={{ fontWeight: 800, color: "#fca5a5", fontSize: 13 }}
                   >
-                    Rebalance Insight
+                    Rebalance Needed
                   </span>
                 </div>
                 <span style={{ color: "#7d8ea5", fontSize: 12 }}>
                   Dividend overweight +{fmt(Math.abs(divGap))}% · Target D:
-                  {fmt(targetWeightTotals.Dividend, 2)}% / G:{fmt(targetWeightTotals.Growth, 2)}%
+                  {phaseData.dividendPct}% / G:{phaseData.growthPct}%
                 </span>
               </div>
             ) : (
@@ -1390,12 +1513,12 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                   <span
                     style={{ fontWeight: 800, color: "#4ade80", fontSize: 13 }}
                   >
-                    Portfolio Looks Aligned
+                    Portfolio Balanced
                   </span>
                   <span
                     style={{ color: "#7d8ea5", fontSize: 12, marginLeft: 8 }}
                   >
-                    Your Portfolio Target
+                    Phase: {phase}
                   </span>
                 </div>
               )
@@ -1435,13 +1558,13 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 {
                   label: "Dividend Value",
                   value: `฿${fmtB(divValue)}`,
-                  sub: `${fmt(divPct)}% (Target ${fmt(targetWeightTotals.Dividend, 2)}%)`,
+                  sub: `${fmt(divPct)}% (Target ${phaseData.dividendPct}%)`,
                   accent: "#34d399",
                 },
                 {
                   label: "Growth Value",
                   value: `฿${fmtB(growValue)}`,
-                  sub: `${fmt(growPct)}% (Target ${fmt(targetWeightTotals.Growth, 2)}%)`,
+                  sub: `${fmt(growPct)}% (Target ${phaseData.growthPct}%)`,
                   accent: "#60a5fa",
                 },
                 {
@@ -1509,7 +1632,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
               }}
             >
               <div className={card} style={{ padding: isMobile ? 16 : 22 }}>
-                <div style={ST}>Portfolio Allocation — Your Target</div>
+                <div style={ST}>Portfolio Allocation — Phase: {phase}</div>
                 <div
                   style={{
                     display: "flex",
@@ -1549,14 +1672,14 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                       {
                         label: "Dividend",
                         pct: divPct,
-                        target: targetWeightTotals.Dividend,
+                        target: phaseData.dividendPct,
                         color: "#34d399",
                         gap: divGap,
                       },
                       {
                         label: "Growth",
                         pct: growPct,
-                        target: targetWeightTotals.Growth,
+                        target: phaseData.growthPct,
                         color: "#60a5fa",
                         gap: growGap,
                       },
@@ -2352,7 +2475,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                     <div
                       style={{ fontSize: 11, color: "#334155", marginTop: 4 }}
                     >
-                      No current sell insight from your target allocation.
+                      Current phase: {phase}
                     </div>
                   </div>
                 ) : (
@@ -2641,14 +2764,14 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                   {
                     label: "Growth",
                     pct: growPct,
-                    target: targetWeightTotals.Growth,
+                    target: phaseData.growthPct,
                     gap: growGap,
                     color: "#60a5fa",
                     advice:
                       growGap < -5
                         ? `🟢 Buy Bias — increase Growth from ${fmt(
                             growPct
-                          )}% to ${fmt(targetWeightTotals.Growth, 2)}%`
+                          )}% to ${phaseData.growthPct}%`
                         : growGap > 5
                         ? `⚠️ Trim Bias — Growth exceeds target by ${fmt(
                             growGap
@@ -2658,7 +2781,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                   {
                     label: "Dividend",
                     pct: divPct,
-                    target: targetWeightTotals.Dividend,
+                    target: phaseData.dividendPct,
                     gap: divGap,
                     color: "#34d399",
                     advice:
@@ -3182,22 +3305,40 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                                 width="72px"
                               />
                             </td>
-                            <td style={{ padding: "4px 5px", textAlign: "right" }}>
-                              <EInput
-                                val={h.targetWeight}
-                                onChange={(v) => updateHolding(i, "targetWeight", v)}
-                                placeholder="0.00"
-                                width="78px"
-                              />
+                            <td
+                              style={{
+                                padding: "4px 5px",
+                                textAlign: "right",
+                                fontSize: 12,
+                                fontFamily: "'DM Mono', monospace",
+                                color:
+                                  targetPct(h.targetWeight) > 0
+                                    ? "#60a5fa"
+                                    : "#64748b",
+                                fontWeight: 800,
+                                letterSpacing: "0.01em",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
                               <span
                                 style={{
-                                  marginLeft: 6,
-                                  color: targetPct(h.targetWeight) > 0 ? "#60a5fa" : "#64748b",
-                                  fontSize: 12,
-                                  fontWeight: 800,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "flex-end",
+                                  gap: 5,
                                 }}
                               >
-                                %
+                                <EInput
+                                  val={
+                                    h.targetWeight === "" || h.targetWeight === null || h.targetWeight === undefined
+                                      ? ""
+                                      : fmt(targetPct(h.targetWeight), 2)
+                                  }
+                                  onChange={(v) => updateHolding(i, "targetWeight", v)}
+                                  placeholder="0.00"
+                                  width="70px"
+                                />
+                                <span style={{ color: "#60a5fa", fontWeight: 800 }}>%</span>
                               </span>
                             </td>
                             <td
@@ -3336,6 +3477,51 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 </div>
               </div>
 
+              <div style={IB}>
+                <div style={ST}>Max Buy Budget</div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "#7d8ea5",
+                    lineHeight: 1.5,
+                    marginBottom: 10,
+                  }}
+                >
+                  Set the maximum amount you're comfortable buying in this
+                  cycle. The engine will use the lower value between Line
+                  Available and Max Buy Budget.
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span style={{ fontSize: 13, color: "#7d8ea5" }}>฿</span>
+                  <input
+                    value={maxBudget}
+                    onChange={(e) => setMaxBudget(e.target.value)}
+                    type="number"
+                    style={{
+                      background: "#0d1526",
+                      border: "1px solid #1d2a3d",
+                      borderRadius: 10,
+                      color: "#f59e0b",
+                      fontSize: 16,
+                      fontFamily: "'DM Mono', monospace",
+                      padding: "9px 12px",
+                      outline: "none",
+                      width: isMobile ? "100%" : "220px",
+                      fontWeight: 800,
+                    }}
+                  />
+                  {!isMobile && (
+                    <span style={{ fontSize: 11, color: "#4b607b" }}>THB</span>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -3348,7 +3534,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                     color: "#e2e8f0",
                   }}
                 >
-                  Target Allocation Coverage
+                  Target Weight Coverage
                 </div>
 
                 <div
@@ -3429,6 +3615,111 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                     );
                   })}
                 </div>
+              </div>
+
+              <div style={IB}>
+                <div
+                  style={{
+                    fontWeight: 800,
+                    fontSize: 13,
+                    marginBottom: 14,
+                    color: "#e2e8f0",
+                  }}
+                >
+                  Phase Controls
+                </div>
+
+                {[
+                  { key: "Build", label: "🏗️ Build" },
+                  { key: "Accumulate", label: "📦 Accumulate" },
+                  { key: "Income", label: "💰 Income" },
+                ].map((p) => (
+                  <div
+                    key={p.key}
+                    style={{
+                      marginBottom: 10,
+                      background: phase === p.key ? "#0c1a2e" : "#080e1c",
+                      border: `1px solid ${
+                        phase === p.key ? "#234980" : "#1a2540"
+                      }`,
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: phase === p.key ? "#8ec5ff" : "#aebacd",
+                        marginBottom: 8,
+                      }}
+                    >
+                      {p.label}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                        gap: 8,
+                      }}
+                    >
+                      {[
+                        {
+                          field: "dividendPct",
+                          label: "Div %",
+                          color: "#34d399",
+                        },
+                        {
+                          field: "growthPct",
+                          label: "Growth %",
+                          color: "#60a5fa",
+                        },
+                      ].map((f) => (
+                        <div key={f.field}>
+                          <div
+                            style={{
+                              fontSize: 9,
+                              color: "#64748b",
+                              marginBottom: 3,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.08em",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {f.label}
+                          </div>
+                          <input
+                            value={phases[p.key][f.field]}
+                            type="number"
+                            onChange={(e) =>
+                              setPhases((prev) => ({
+                                ...prev,
+                                [p.key]: {
+                                  ...prev[p.key],
+                                  [f.field]:
+                                    num(e.target.value) || e.target.value,
+                                },
+                              }))
+                            }
+                            style={{
+                              width: "100%",
+                              background: "#0d1526",
+                              border: `1px solid ${f.color}40`,
+                              borderRadius: 8,
+                              color: f.color,
+                              fontSize: 13,
+                              fontFamily: "'DM Mono', monospace",
+                              padding: "6px 8px",
+                              outline: "none",
+                              fontWeight: 700,
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <button
