@@ -1,14 +1,15 @@
-/* eslint-disable */
 // @ts-nocheck
 import { useEffect, useMemo, useState } from "react";
 import {
   PieChart,
   Pie,
   Cell,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   ResponsiveContainer,
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -18,8 +19,9 @@ import {
   PolarGrid,
   PolarAngleAxis,
 } from "recharts";
+
 const SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbytMGcr3gNF07BOuZpfjoxPf9C34xNA5fJ034wBU1OYW1aLDw1z368R07fWcV8Gvockmg/exec";
+  "https://script.google.com/macros/s/AKfycbwIzTSGUZd8uxD5SHgHWHStW3M9Zd_itO42TOHj9IvyYdG9nbZoowRRMbbfKzpvt-V8/exec";
 
 const DEFAULT_TARGETS = {
   totalWealth: 5000000,
@@ -29,10 +31,9 @@ const DEFAULT_TARGETS = {
   annualDividend: 200000,
 };
 
-const DEFAULT_PHASES = {
-  Build: { dividendPct: 40, growthPct: 60, monthlyGrowth: 15000 },
-  Accumulate: { dividendPct: 50, growthPct: 50, monthlyGrowth: 15000 },
-  Income: { dividendPct: 70, growthPct: 30, monthlyGrowth: 15000 },
+const DEFAULT_TARGET_ALLOCATION = {
+  Dividend: 40,
+  Growth: 60,
 };
 
 const EMPTY_HOLDING = {
@@ -46,7 +47,15 @@ const EMPTY_HOLDING = {
 
 const HOLDING_TYPES = ["Dividend", "Growth", "Other"];
 
-const normalizeHoldingType = (...values) => {
+const DECISION_NOTE_OPTIONS = [
+  "Follow System",
+  "Add on Dip",
+  "Reduce Risk",
+  "Manual Override",
+  "Off-System",
+];
+
+const normalizeHoldingType = (...values: any[]) => {
   for (const value of values) {
     const text = String(value ?? "")
       .trim()
@@ -65,53 +74,43 @@ const normalizeHoldingType = (...values) => {
   return "Other";
 };
 
-const typeBadgeStyle = (type) => {
+const typeBadgeStyle = (type: unknown) => {
   const t = normalizeHoldingType(type);
-  if (t === "Dividend") {
-    return {
-      background: "#07261c",
-      color: "#34d399",
-      border: "1px solid #0d5a3d",
-    };
-  }
-  if (t === "Growth") {
-    return {
-      background: "#0b1e37",
-      color: "#60a5fa",
-      border: "1px solid #234980",
-    };
-  }
-  return {
-    background: "#111827",
-    color: "#93a4bb",
-    border: "1px solid #334155",
-  };
-};
 
-const fmt = (n, d = 2) =>
-  isNaN(n) || n === null || n === ""
+  if (t === "Dividend") {
+    return { background: "#1f8b4c", color: "#fff" };
+  }
+
+  if (t === "Growth") {
+    return { background: "#1f4c8b", color: "#fff" };
+  }
+
+  return { background: "#444", color: "#fff" };
+};
+const fmt = (n: any, d: number = 2) => {
+  return isNaN(n) || n === null || n === ""
     ? "—"
     : Number(n).toLocaleString("th-TH", {
         minimumFractionDigits: d,
         maximumFractionDigits: d,
       });
-
-const fmtB = (n) =>
+};
+const fmtB = (n: any) =>
   n >= 1000000
     ? `${fmt(n / 1000000)}M`
     : n >= 1000
     ? `${fmt(n / 1000, 1)}K`
     : fmt(n);
 
-const num = (v) => parseFloat(String(v).replace(/,/g, "")) || 0;
+const num = (v: any) => parseFloat(String(v).replace(/,/g, "")) || 0;
 
-const targetPct = (v) => {
+const targetPct = (v: any) => {
   const n = num(v);
   if (!n) return 0;
   return n <= 1 ? n * 100 : n;
 };
 
-const fmtPct = (v, d = 0) => {
+const fmtPct = (v: any, d: number = 0) => {
   const pct = targetPct(v);
   return pct > 0 ? `${fmt(pct, d)}%` : "—";
 };
@@ -125,7 +124,8 @@ function EInput({
   width = "100%",
   small = false,
   disabled = false,
-}) {
+}: any) {
+
   const [focus, setFocus] = useState(false);
 
   const base = {
@@ -158,7 +158,7 @@ function EInput({
           cursor: disabled ? "not-allowed" : "pointer",
         }}
       >
-        {options.map((o) => (
+        {options.map((o: any) => (
           <option key={o} value={o}>
             {o}
           </option>
@@ -181,7 +181,8 @@ function EInput({
   );
 }
 
-function CTip({ active, payload, label }) {
+function CTip(props: any) { 
+  const { active, payload, label } = props || {};
   if (!active || !payload?.length) return null;
   return (
     <div
@@ -200,7 +201,7 @@ function CTip({ active, payload, label }) {
           {label}
         </div>
       )}
-      {payload.map((p, i) => (
+      {payload.map((p: any, i: number) => (
         <div key={i} style={{ marginBottom: 3 }}>
           <span style={{ color: p.color || "#94a3b8" }}>{p.name}:</span>{" "}
           <span style={{ fontFamily: "'DM Mono', monospace" }}>
@@ -212,20 +213,16 @@ function CTip({ active, payload, label }) {
   );
 }
 
-export default function App() {
-  console.log("NORMAL SERVICE");
 
+function App() {
   const [tab, setTab] = useState("dashboard");
-  const [phase, setPhase] = useState("Build");
   const [holdings, setHoldings] = useState(
     Array(18)
       .fill(null)
       .map(() => ({ ...EMPTY_HOLDING }))
   );
   const [targets, setTargets] = useState({ ...DEFAULT_TARGETS });
-  const [phases, setPhases] = useState({ ...DEFAULT_PHASES });
   const [cash, setCash] = useState(0);
-  const [maxBudget, setMaxBudget] = useState(5000);
   const [portfolioName, setPortfolioName] = useState("");
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -243,18 +240,19 @@ export default function App() {
   const [summary, setSummary] = useState({
     lastUpdate: "",
     lineAvailable: 0,
-    maxBudget: 0,
-    effectiveBudget: 0,
-    phase: "BUILD",
     totalBuyNeed: 0,
     growthSell: 0,
     remainingNeed: 0,
   });
 
-  const [buyOrders, setBuyOrders] = useState([]);
-  const [sellOrders, setSellOrders] = useState([]);
-  const [originalPortfolioSymbols, setOriginalPortfolioSymbols] = useState([]);
-  const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState([]);
+ const [buyOrders, setBuyOrders] = useState<any[]>([]);
+const [sellOrders, setSellOrders] = useState<any[]>([]);
+const [decisionAnalytics, setDecisionAnalytics] = useState({
+  trend: [],
+  status: [],
+});
+const [originalPortfolioSymbols, setOriginalPortfolioSymbols] = useState<string[]>([]);
+const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>([]);
   const [decisionSaved, setDecisionSaved] = useState(false);
   const [decisionForm, setDecisionForm] = useState({
     assetCode: "",
@@ -297,7 +295,7 @@ export default function App() {
       const apiPortfolio = data.portfolio || data.holdings || [];
       const apiSellOrders = data.sellAlerts || data.sellOrders || [];
       const apiBuyOrders = data.buyOrders || [];
-      const apiPhaseControl = data.phaseControl || {};
+      const apiDecisionAnalytics = data.decisionAnalytics || { trend: [], status: [] };
 
       setPortfolioName(
         apiSummary.portfolioName || data.portfolioName || "Portfolio OS"
@@ -310,22 +308,11 @@ export default function App() {
         apiSummary.cash ??
         0;
 
-      const portfolioPhase =
-        apiSummary.phase ||
-        apiSummary.portfolioPhase ||
-        apiSummary.portfolio_phase ||
-        apiPhaseControl.portfolioPhase ||
-        "Build";
-
       setSummary({
         ...apiSummary,
         portfolioValue:
           apiSummary.portfolioValue ?? apiSummary.portfolio_value ?? 0,
         lineAvailable,
-        maxBudget: apiSummary.maxBudget ?? apiSummary.max_budget ?? 5000,
-        effectiveBudget:
-          apiSummary.effectiveBudget ?? apiSummary.effective_budget ?? 0,
-        phase: portfolioPhase,
         dividendAllocation:
           apiSummary.dividendAllocation ?? apiSummary.dividend_allocation ?? 0,
         growthAllocation:
@@ -334,47 +321,6 @@ export default function App() {
       });
 
       setCash(num(lineAvailable));
-      setMaxBudget(num(apiSummary.maxBudget ?? apiSummary.max_budget ?? 5000));
-
-      const rawPhase = String(portfolioPhase).trim().toUpperCase();
-
-      const phaseMap = {
-        BUILD: "Build",
-        ACCUMULATE: "Accumulate",
-        INCOMEFOCUS: "Income",
-        "INCOME FOCUS": "Income",
-        INCOME: "Income",
-      };
-      setPhase(phaseMap[rawPhase] || portfolioPhase || "Build");
-
-      if (Array.isArray(apiPhaseControl.phases)) {
-        const nextPhases = { ...DEFAULT_PHASES };
-        apiPhaseControl.phases.forEach((p) => {
-          const name = String(p.phase || "").trim();
-          if (!name) return;
-          const dividendPct =
-            num(p.dividend) <= 1 ? num(p.dividend) * 100 : num(p.dividend);
-          const growthPct =
-            num(p.growth) <= 1 ? num(p.growth) * 100 : num(p.growth);
-          const phaseKeyMap = {
-            BUILD: "Build",
-            ACCUMULATE: "Accumulate",
-            INCOME: "Income",
-            INCOMEFOCUS: "Income",
-            "INCOME FOCUS": "Income",
-          };
-          const key =
-            phaseKeyMap[name.toUpperCase().replace(/\s+/g, " ")] || name;
-          nextPhases[key] = {
-            ...(nextPhases[key] || {}),
-            dividendPct,
-            growthPct,
-            monthlyGrowth: nextPhases[key]?.monthlyGrowth || 15000,
-          };
-        });
-        setPhases(nextPhases);
-      }
-
       if (data.targets) {
         setTargets((prev) => ({
           ...prev,
@@ -408,7 +354,10 @@ export default function App() {
             source: type,
             units: h.units ?? h.currentUnits ?? "",
             avgCost: h.avgCost ?? "",
-            targetWeight: h.targetWeight ?? "",
+            targetWeight:
+              h.targetWeight === "" || h.targetWeight === undefined || h.targetWeight === null
+                ? ""
+                : Number(targetPct(h.targetWeight)).toFixed(2),
             price: h.price ?? h.marketPrice ?? "",
           };
         });
@@ -425,7 +374,7 @@ export default function App() {
         setDeletedPortfolioSymbols([]);
 
         while (normalized.length < 18) {
-          normalized.push({ ...EMPTY_HOLDING });
+          normalized.push({ ...EMPTY_HOLDING, source: EMPTY_HOLDING.type });
         }
 
         setHoldings(normalized.slice(0, 18));
@@ -440,11 +389,12 @@ export default function App() {
               symbol: o.symbol || o.assetCode || "",
               type: normalizeHoldingType(o.type, o.source, o.osType),
               price: o.price ?? o.marketPrice ?? 0,
-              suggestedBuy: o.suggestedBuy ?? o.buyNeed ?? o.suggestedCash ?? 0,
               units: o.units ?? o.buyUnits ?? 0,
-              cash: o.cash ?? o.cashUsed ?? o.actualBuyValue ?? 0,
-              status: o.status || "BUY",
-              note: o.note || o.statusNote || "",
+              cash:
+                o.cash ?? o.cashUsed ?? o.actualBuyValue ?? o.suggestedBuy ?? 0,
+              status: o.status || o.statusNote || "BUY",
+              note: o.note || "",
+              execute: String(o.execute || o.note || "EXECUTE").trim().toUpperCase(),
             }))
         );
       } else {
@@ -460,17 +410,33 @@ export default function App() {
               symbol: o.symbol || o.assetCode || "",
               type: normalizeHoldingType(o.type, o.source, o.osType),
               price: o.price ?? o.marketPrice ?? "",
-              suggestedSell: o.suggestedSell ?? 0,
               units: o.units ?? o.sellUnits ?? "",
-              sellValue: o.sellValue ?? o.actualSellValue ?? "",
-              status: o.status || o.sellStatus || "SELL",
-              note: o.note || o.statusNote || "",
+              sellValue:
+                o.sellValue ?? o.actualSellValue ?? o.suggestedSell ?? "",
+              status: o.status || o.sellStatus || o.statusNote || "",
+              note: o.note || "",
             }))
         );
       } else {
         setSellOrders([]);
       }
-    } catch (err) {
+
+      setDecisionAnalytics({
+        trend: Array.isArray(apiDecisionAnalytics.trend)
+          ? apiDecisionAnalytics.trend.map((d) => ({
+              ...d,
+              score: num(d.score),
+              outcomePercent: num(d.outcomePercent),
+            }))
+          : [],
+        status: Array.isArray(apiDecisionAnalytics.status)
+          ? apiDecisionAnalytics.status.map((d) => ({
+              status: d.status,
+              count: num(d.count),
+            }))
+          : [],
+      });
+    } catch (err: any) {
       console.error("Load error:", err);
       setLoadError(err.message || "Load error");
     } finally {
@@ -511,11 +477,28 @@ export default function App() {
   const totalCost = computed.reduce((s, h) => s + h.cost, 0);
   const totalGLPct = totalCost > 0 ? (totalGL / totalCost) * 100 : 0;
 
-  const phaseData = phases[phase] || phases.Build;
   const divPct = equityValue > 0 ? (divValue / equityValue) * 100 : 0;
   const growPct = equityValue > 0 ? (growValue / equityValue) * 100 : 0;
-  const divGap = divPct - phaseData.dividendPct;
-  const growGap = growPct - phaseData.growthPct;
+
+  const targetWeightTotals = useMemo(() => {
+    const totals = { Dividend: 0, Growth: 0 };
+
+    holdings.forEach((h) => {
+      const type = normalizeHoldingType(h.type);
+      const weight = targetPct(h.targetWeight);
+
+      if (type === "Dividend" || type === "Growth") {
+        totals[type] += weight;
+      }
+    });
+
+    const hasUserTarget = holdings.some((h) => targetPct(h.targetWeight) > 0);
+    return hasUserTarget ? totals : { ...DEFAULT_TARGET_ALLOCATION };
+  }, [holdings]);
+
+  const divGap = divPct - targetWeightTotals.Dividend;
+  const growGap = growPct - targetWeightTotals.Growth;
+  const needRebal = equityValue > 0 && Math.abs(divGap) > 5;
 
   const totalBuyCash = num(
     summary.totalBuyNeed ?? summary.total_buy_need ?? summary.buyNeed
@@ -552,39 +535,6 @@ export default function App() {
     setHoldings((h) => h.filter((_, idx) => idx !== i));
   };
 
-  const savePortfolioPhase = async (nextPhase) => {
-    try {
-      setPhase(nextPhase);
-      setLoading(true);
-      setLoadError("");
-
-      const res = await fetch(SCRIPT_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8",
-        },
-        body: JSON.stringify({
-          action: "saveSettings",
-          portfolioPhase: nextPhase,
-        }),
-      });
-
-      const result = await res.json();
-
-      if (!result.success) {
-        throw new Error(result.message || "Save phase failed");
-      }
-
-      await loadPortfolioFromSheet();
-    } catch (err) {
-      console.error("Phase save error:", err);
-      setLoadError(err.message || "Phase save error");
-      alert(`Save phase failed: ${err.message || "Unknown error"}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const getHoldingAvgCost = (symbol) => {
     const code = String(symbol || "")
       .trim()
@@ -608,7 +558,7 @@ export default function App() {
       actualPrice:
         current.actualPrice ??
         (order.price === "" || order.price === undefined ? "" : order.price),
-      note: current.note ?? "",
+      note: current.note ?? "Follow System",
     };
   };
 
@@ -664,7 +614,7 @@ export default function App() {
           suggestedPrice,
           actualPrice,
           buySellPrice: actualPrice,
-          note: edit.note || order.note || "",
+          note: edit.note || "Follow System",
         }),
       });
 
@@ -676,7 +626,8 @@ export default function App() {
       setLoggedOrderIds((prev) => [...prev, orderId]);
       setDecisionSaved(true);
       setTimeout(() => setDecisionSaved(false), 2000);
-    } catch (err) {
+      await loadPortfolioFromSheet();
+    } catch (err: any) {
       console.error("Order decision save error:", err);
       setLoadError(err.message || "Order decision save error");
       alert(`Save order decision failed: ${err.message || "Unknown error"}`);
@@ -755,7 +706,7 @@ export default function App() {
       });
 
       await loadPortfolioFromSheet();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Decision log save error:", err);
       setLoadError(err.message || "Decision log save error");
       alert(`Save record failed: ${err.message || "Unknown error"}`);
@@ -793,6 +744,7 @@ export default function App() {
             osType: normalizeHoldingType(h.type),
             units: h.units === "" ? "" : Number(h.units),
             avgCost: h.avgCost === "" ? "" : Number(h.avgCost),
+            targetWeight: h.targetWeight === "" ? "" : targetPct(h.targetWeight),
           })),
       };
 
@@ -861,10 +813,63 @@ export default function App() {
       setDeletedPortfolioSymbols([]);
 
       await loadPortfolioFromSheet();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Save error:", err);
       setLoadError(err.message || "Save error");
       alert(`Save failed: ${err.message || "Unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveProgressTargets = async () => {
+    try {
+      setLoading(true);
+      setLoadError("");
+
+      const progressTargets = {
+        totalWealth: num(targets.totalWealth),
+        dividendValue: num(targets.dividendValue),
+        growthValue: num(targets.growthValue),
+      };
+
+      const payload = {
+        action: "saveSettings",
+        portfolioName: portfolioName,
+        lineAvailable: Number(cash) || 0,
+
+        // Keep original nested structure
+        targets: progressTargets,
+
+        // Add flat aliases for Code.gs versions that write directly to API OUTPUT K4:K6
+        totalWealthTarget: progressTargets.totalWealth,
+        dividendValueTarget: progressTargets.dividendValue,
+        growthValueTarget: progressTargets.growthValue,
+        targetTotalWealth: progressTargets.totalWealth,
+        targetDividendValue: progressTargets.dividendValue,
+        targetGrowthValue: progressTargets.growthValue,
+      };
+
+      const res = await fetch(SCRIPT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await res.json();
+      if (!result.success && result.status !== "success") {
+        throw new Error(result.message || "Save targets failed");
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      await loadPortfolioFromSheet();
+    } catch (err: any) {
+      console.error("Save targets error:", err);
+      setLoadError(err.message || "Save targets error");
+      alert(`Save targets failed: ${err.message || "Unknown error"}`);
     } finally {
       setLoading(false);
     }
@@ -911,27 +916,19 @@ export default function App() {
     { name: "Growth", value: growValue },
   ];
 
-  const targetWeightTotals = useMemo(() => {
-    const currentPhaseData = phases[phase] ||
-      phases.Build || { dividendPct: 40, growthPct: 60 };
-    return {
-      Dividend: Number(currentPhaseData.dividendPct) || 0,
-      Growth: Number(currentPhaseData.growthPct) || 0,
-    };
-  }, [phases, phase]);
 
   const targetCoverageCards = [
     {
-      label: "Dividend Target Weight",
+      label: "Dividend Target Allocation",
       total: targetWeightTotals.Dividend,
       color: "#34d399",
-      subtitle: "From MASTER TARGET phase allocation",
+      subtitle: "From your portfolio target",
     },
     {
-      label: "Growth Target Weight",
+      label: "Growth Target Allocation",
       total: targetWeightTotals.Growth,
       color: "#60a5fa",
-      subtitle: "From MASTER TARGET phase allocation",
+      subtitle: "From your portfolio target",
     },
   ];
 
@@ -968,6 +965,72 @@ export default function App() {
     actual: m.target > 0 ? Math.min((m.current / m.target) * 100, 100) : 0,
     target: 100,
   }));
+
+  const decisionTrendData = (decisionAnalytics.trend || []).map((d, i) => ({
+    name: `D${i + 1}`,
+    note: d.note || "",
+    score: num(d.score),
+    outcomePercent: num(d.outcomePercent),
+  }));
+
+  const decisionStatusData = (decisionAnalytics.status || []).map((d) => ({
+    name: String(d.status || "").replace(/[🟢🟡🔴]/g, "").trim() || String(d.status || "Status"),
+    value: num(d.count),
+    rawStatus: d.status,
+  }));
+
+  const averageDecisionScore =
+    decisionTrendData.length > 0
+      ? decisionTrendData.reduce((s, d) => s + num(d.score), 0) /
+        decisionTrendData.length
+      : 0;
+
+  const averageOutcomePercent =
+    decisionTrendData.length > 0
+      ? decisionTrendData.reduce((s, d) => s + num(d.outcomePercent), 0) /
+        decisionTrendData.length
+      : 0;
+
+  const decisionCount = decisionTrendData.length;
+
+  const followSystemCount = decisionTrendData.filter(
+    (d) => String(d.note || "").trim() === "Follow System"
+  ).length;
+
+  const followSystemRate =
+    decisionCount > 0 ? (followSystemCount / decisionCount) * 100 : 0;
+
+  const decisionAverageByNote = Object.values(
+    decisionTrendData.reduce((acc, d) => {
+      const key = String(d.note || "Unknown").trim() || "Unknown";
+      if (!acc[key]) {
+        acc[key] = {
+          note: key,
+          count: 0,
+          totalScore: 0,
+          totalOutcome: 0,
+        };
+      }
+      acc[key].count += 1;
+      acc[key].totalScore += num(d.score);
+      acc[key].totalOutcome += num(d.outcomePercent);
+      return acc;
+    }, {})
+  ).map((d: any) => ({
+    name: d.note,
+    count: d.count,
+    avgScore: d.count > 0 ? d.totalScore / d.count : 0,
+    avgOutcomePercent: d.count > 0 ? d.totalOutcome / d.count : 0,
+  }));
+
+  const decisionRadarData = DECISION_NOTE_OPTIONS.map((note) => {
+    const found = decisionAverageByNote.find((d: any) => d.name === note);
+    return {
+      reason: note,
+      avgScore: found ? num((found as any).avgScore) : 0,
+      fullScore: 3,
+    };
+  });
 
   return (
     <div
@@ -1131,7 +1194,7 @@ export default function App() {
                 marginLeft: 2,
               }}
             >
-              v3.3
+              Advance v1.0
             </span>
           )}
         </div>
@@ -1205,29 +1268,16 @@ export default function App() {
               padding: isMobile ? "5px 8px" : "6px 12px",
             }}
           >
-            {!isMobile && (
-              <span
-                style={{
-                  fontSize: 10,
-                  color: "#7d8ea5",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                  fontWeight: 700,
-                }}
-              >
-                Service
-              </span>
-            )}
             <span
               style={{
+                fontSize: isMobile ? 11 : 12,
                 color: "#60a5fa",
-                fontSize: isMobile ? 12 : 13,
                 fontWeight: 800,
-                fontFamily: "'Inter', sans-serif",
-                whiteSpace: "nowrap",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
               }}
             >
-              Normal
+              Advance
             </span>
           </div>
           {!isMobile && (
@@ -1298,6 +1348,59 @@ export default function App() {
 
         {tab === "dashboard" && (
           <>
+            {needRebal ? (
+              <div
+                style={{
+                  background: "linear-gradient(135deg,#2b1417,#1b0c0e)",
+                  border: "1px solid #7f1d1d",
+                  borderRadius: 14,
+                  padding: isMobile ? "12px 14px" : "14px 18px",
+                  marginBottom: 22,
+                  display: "flex",
+                  alignItems: isMobile ? "flex-start" : "center",
+                  gap: 12,
+                  flexDirection: isMobile ? "column" : "row",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span>🔴</span>
+                  <span
+                    style={{ fontWeight: 800, color: "#fca5a5", fontSize: 13 }}
+                  >
+                    Rebalance Insight
+                  </span>
+                </div>
+                <span style={{ color: "#7d8ea5", fontSize: 12 }}>
+                  Dividend overweight +{fmt(Math.abs(divGap))}% · Target D:
+                  {fmt(targetWeightTotals.Dividend, 2)}% / G:{fmt(targetWeightTotals.Growth, 2)}%
+                </span>
+              </div>
+            ) : (
+              equityValue > 0 && (
+                <div
+                  style={{
+                    background: "#06261a",
+                    border: "1px solid #0d5a3d",
+                    borderRadius: 14,
+                    padding: isMobile ? "12px 14px" : "14px 18px",
+                    marginBottom: 22,
+                  }}
+                >
+                  <span>✅ </span>
+                  <span
+                    style={{ fontWeight: 800, color: "#4ade80", fontSize: 13 }}
+                  >
+                    Portfolio Looks Aligned
+                  </span>
+                  <span
+                    style={{ color: "#7d8ea5", fontSize: 12, marginLeft: 8 }}
+                  >
+                    Your Portfolio Target
+                  </span>
+                </div>
+              )
+            )}
+
             <div
               style={{
                 display: "grid",
@@ -1332,13 +1435,13 @@ export default function App() {
                 {
                   label: "Dividend Value",
                   value: `฿${fmtB(divValue)}`,
-                  sub: `${fmt(divPct)}%`,
+                  sub: `${fmt(divPct)}% (Target ${fmt(targetWeightTotals.Dividend, 2)}%)`,
                   accent: "#34d399",
                 },
                 {
                   label: "Growth Value",
                   value: `฿${fmtB(growValue)}`,
-                  sub: `${fmt(growPct)}%`,
+                  sub: `${fmt(growPct)}% (Target ${fmt(targetWeightTotals.Growth, 2)}%)`,
                   accent: "#60a5fa",
                 },
                 {
@@ -1406,7 +1509,7 @@ export default function App() {
               }}
             >
               <div className={card} style={{ padding: isMobile ? 16 : 22 }}>
-                <div style={ST}>Portfolio Allocation</div>
+                <div style={ST}>Portfolio Allocation — Your Target</div>
                 <div
                   style={{
                     display: "flex",
@@ -1446,14 +1549,14 @@ export default function App() {
                       {
                         label: "Dividend",
                         pct: divPct,
-                        target: phaseData.dividendPct,
+                        target: targetWeightTotals.Dividend,
                         color: "#34d399",
                         gap: divGap,
                       },
                       {
                         label: "Growth",
                         pct: growPct,
-                        target: phaseData.growthPct,
+                        target: targetWeightTotals.Growth,
                         color: "#60a5fa",
                         gap: growGap,
                       },
@@ -1661,7 +1764,7 @@ export default function App() {
                         ["P/L (฿)", false],
                         ["P/L (%)", false],
                       ].map(([h, l]) => (
-                        <th key={h} style={TH(l)}>
+                        <th key={h} style={TH(Boolean(l))}>
                           {h}
                         </th>
                       ))}
@@ -1838,7 +1941,7 @@ export default function App() {
                 </button>
               </div>
 
-              {buyOrders.length === 0 && (
+              {buyOrders.filter((o, i) => String(o.execute || o.note || "EXECUTE").trim().toUpperCase() !== "SKIP" && !loggedOrderIds.includes(`BUY-${o.id || o.symbol || i}`)).length === 0 && (
                 <div
                   style={{
                     background: "#080e1c",
@@ -1854,7 +1957,7 @@ export default function App() {
                 </div>
               )}
 
-              {buyOrders.map((o, i) => {
+              {buyOrders.filter((o, i) => String(o.execute || o.note || "EXECUTE").trim().toUpperCase() !== "SKIP" && !loggedOrderIds.includes(`BUY-${o.id || o.symbol || i}`)).map((o, i) => {
                 const orderId = `BUY-${o.id || o.symbol || i}`;
                 const edit = getOrderEdit(o, "BUY");
                 const isLogged = loggedOrderIds.includes(orderId);
@@ -1863,7 +1966,6 @@ export default function App() {
                 const isActionableBuy = buyUnits > 0 && buyCash > 0;
                 const orderNote =
                   o.note || o.status || "Wait for next budget cycle";
-                const isSoftSuggestion = /maybe|wait|consider/i.test(orderNote);
 
                 return (
                   <div
@@ -1914,26 +2016,14 @@ export default function App() {
                       <span
                         className="pill"
                         style={{
-                          background: isSoftSuggestion
-                            ? "#33260b"
-                            : isActionableBuy
-                            ? "#07261c"
-                            : "#33260b",
-                          color: isSoftSuggestion
-                            ? "#fbbf24"
-                            : isActionableBuy
-                            ? "#4ade80"
-                            : "#fbbf24",
+                          background: isActionableBuy ? "#07261c" : "#33260b",
+                          color: isActionableBuy ? "#4ade80" : "#fbbf24",
                           border: `1px solid ${
-                            isSoftSuggestion
-                              ? "#8a6a16"
-                              : isActionableBuy
-                              ? "#0d5a3d"
-                              : "#8a6a16"
+                            isActionableBuy ? "#0d5a3d" : "#8a6a16"
                           }`,
                         }}
                       >
-                        {orderNote || (isActionableBuy ? "BUY" : "WAIT")}
+                        {isActionableBuy ? "BUY" : orderNote}
                       </span>
                     </div>
 
@@ -1945,9 +2035,12 @@ export default function App() {
                       }}
                     >
                       {[
-                        ["Suggested Buy", `฿${fmt(num(o.suggestedBuy))}`],
-                        ["Buy Units", `${buyUnits.toLocaleString()} shares`],
-                        ["Actual Buy Value", `฿${fmt(buyCash)}`],
+                        ["Suggested Price", `฿${fmt(num(o.price))}`],
+                        [
+                          "Suggested Units",
+                          `${buyUnits.toLocaleString()} shares`,
+                        ],
+                        ["Suggested Cash", `฿${fmt(buyCash)}`],
                       ].map(([k, v]) => (
                         <div
                           key={k}
@@ -2075,13 +2168,12 @@ export default function App() {
                       </div>
                     </div>
 
-                    <input
-                      value={edit.note}
+                    <select
+                      value={edit.note || "Follow System"}
                       onChange={(e) =>
                         updateOrderEdit(orderId, "note", e.target.value)
                       }
                       disabled={isLogged || !isActionableBuy}
-                      placeholder="Optional note / override reason"
                       style={{
                         width: "100%",
                         marginTop: 8,
@@ -2094,7 +2186,13 @@ export default function App() {
                         padding: "8px 10px",
                         outline: "none",
                       }}
-                    />
+                    >
+                      {DECISION_NOTE_OPTIONS.map((noteOption) => (
+                        <option key={noteOption} value={noteOption}>
+                          {noteOption}
+                        </option>
+                      ))}
+                    </select>
 
                     <label
                       style={{
@@ -2254,7 +2352,7 @@ export default function App() {
                     <div
                       style={{ fontSize: 11, color: "#334155", marginTop: 4 }}
                     >
-                      Current phase: {phase}
+                      No current sell insight from your target allocation.
                     </div>
                   </div>
                 ) : (
@@ -2322,7 +2420,7 @@ export default function App() {
                               border: "1px solid #7f1d1d",
                             }}
                           >
-                            {o.note || o.status || "PENDING"}
+                            {o.status || "PENDING"}
                           </span>
                         </div>
 
@@ -2337,19 +2435,17 @@ export default function App() {
                         >
                           {[
                             [
-                              "Suggested Sell",
-                              o.suggestedSell === ""
-                                ? "—"
-                                : `฿${fmt(num(o.suggestedSell))}`,
+                              "Suggested Price",
+                              o.price === "" ? "—" : `฿${fmt(num(o.price))}`,
                             ],
                             [
-                              "Sell Units",
+                              "Suggested Units",
                               o.units === ""
                                 ? "—"
                                 : `${Number(o.units).toLocaleString()} shares`,
                             ],
                             [
-                              "Actual Sell Value",
+                              "Sell Value",
                               o.sellValue === ""
                                 ? "—"
                                 : `฿${fmt(num(o.sellValue))}`,
@@ -2481,13 +2577,12 @@ export default function App() {
                           </div>
                         </div>
 
-                        <input
-                          value={edit.note}
+                        <select
+                          value={edit.note || "Follow System"}
                           onChange={(e) =>
                             updateOrderEdit(orderId, "note", e.target.value)
                           }
                           disabled={isLogged}
-                          placeholder="Optional note / override reason"
                           style={{
                             width: "100%",
                             marginTop: 8,
@@ -2500,7 +2595,13 @@ export default function App() {
                             padding: "8px 10px",
                             outline: "none",
                           }}
-                        />
+                        >
+                          {DECISION_NOTE_OPTIONS.map((noteOption) => (
+                            <option key={noteOption} value={noteOption}>
+                              {noteOption}
+                            </option>
+                          ))}
+                        </select>
 
                         <label
                           style={{
@@ -2532,6 +2633,124 @@ export default function App() {
                     );
                   })
                 )}
+              </div>
+
+              <div className={card} style={{ padding: isMobile ? 16 : 22 }}>
+                <div style={ST}>Rebalance Insight</div>
+                {[
+                  {
+                    label: "Growth",
+                    pct: growPct,
+                    target: targetWeightTotals.Growth,
+                    gap: growGap,
+                    color: "#60a5fa",
+                    advice:
+                      growGap < -5
+                        ? `🟢 Buy Bias — increase Growth from ${fmt(
+                            growPct
+                          )}% to ${fmt(targetWeightTotals.Growth, 2)}%`
+                        : growGap > 5
+                        ? `⚠️ Trim Bias — Growth exceeds target by ${fmt(
+                            growGap
+                          )}%`
+                        : `✅ Growth is on target`,
+                  },
+                  {
+                    label: "Dividend",
+                    pct: divPct,
+                    target: targetWeightTotals.Dividend,
+                    gap: divGap,
+                    color: "#34d399",
+                    advice:
+                      divGap > 5
+                        ? `🔴 Trim Bias — Dividend exceeds target by ${fmt(
+                            divGap
+                          )}%`
+                        : divGap < -5
+                        ? `🟢 Buy Bias — increase Dividend`
+                        : `✅ Dividend is on target`,
+                  },
+                ].map((r, i) => {
+                  const isOk = Math.abs(r.gap) <= 5;
+                  const isOver = r.gap > 5;
+
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        background: isOk
+                          ? "#080e1c"
+                          : isOver
+                          ? "#1a0f0f"
+                          : "#0d1a10",
+                        border: `1px solid ${
+                          isOk ? "#1a2540" : isOver ? "#7f1d1d" : "#0d5a3d"
+                        }`,
+                        borderRadius: 10,
+                        padding: "12px 14px",
+                        marginBottom: 10,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: isOk
+                            ? "#4ade80"
+                            : isOver
+                            ? "#fca5a5"
+                            : "#4ade80",
+                          fontWeight: 700,
+                          marginBottom: 4,
+                        }}
+                      >
+                        {r.advice}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#64748b",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        Current{" "}
+                        <span
+                          style={{
+                            color: r.color,
+                            fontFamily: "'DM Mono', monospace",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {fmt(r.pct)}%
+                        </span>
+                        &nbsp;→ Target{" "}
+                        <span
+                          style={{
+                            fontFamily: "'DM Mono', monospace",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {r.target}%
+                        </span>
+                        &nbsp;(Gap:{" "}
+                        <span
+                          style={{
+                            color: isOk
+                              ? "#4ade80"
+                              : isOver
+                              ? "#f87171"
+                              : "#f59e0b",
+                            fontFamily: "'DM Mono', monospace",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {r.gap > 0 ? "+" : ""}
+                          {fmt(r.gap)}%
+                        </span>
+                        )
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -2835,8 +3054,8 @@ export default function App() {
                     <div
                       style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}
                     >
-                      Enter symbol, type, units, and average cost. Price is
-                      automatic.
+                      Enter symbol, type, units, average cost, and target %.
+                      Price is automatic.
                     </div>
                   </div>
                   <button
@@ -2874,6 +3093,7 @@ export default function App() {
                           "Type",
                           "Units",
                           "Avg Cost",
+                          "Target %",
                           "Price",
                           "Market Value",
                           "",
@@ -2962,6 +3182,24 @@ export default function App() {
                                 width="72px"
                               />
                             </td>
+                            <td style={{ padding: "4px 5px", textAlign: "right" }}>
+                              <EInput
+                                val={h.targetWeight}
+                                onChange={(v) => updateHolding(i, "targetWeight", v)}
+                                placeholder="0.00"
+                                width="78px"
+                              />
+                              <span
+                                style={{
+                                  marginLeft: 6,
+                                  color: targetPct(h.targetWeight) > 0 ? "#60a5fa" : "#64748b",
+                                  fontSize: 12,
+                                  fontWeight: 800,
+                                }}
+                              >
+                                %
+                              </span>
+                            </td>
                             <td
                               style={{
                                 padding: "6px 10px",
@@ -3012,7 +3250,7 @@ export default function App() {
                         }}
                       >
                         <td
-                          colSpan={6}
+                          colSpan={7}
                           style={{
                             padding: "11px 14px",
                             fontSize: 11,
@@ -3097,6 +3335,7 @@ export default function App() {
                   )}
                 </div>
               </div>
+
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -3105,21 +3344,90 @@ export default function App() {
                   style={{
                     fontWeight: 800,
                     fontSize: 13,
-                    marginBottom: 10,
+                    marginBottom: 14,
                     color: "#e2e8f0",
                   }}
                 >
-                  Normal Service
+                  Target Allocation Coverage
                 </div>
+
                 <div
                   style={{
-                    fontSize: 12,
-                    color: "#7d8ea5",
-                    lineHeight: 1.6,
+                    display: "grid",
+                    gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                    gap: 10,
                   }}
                 >
-                  Normal Service You decide your portfolio. We help you see it
-                  clearer. Just better decisions.
+                  {targetCoverageCards.map((c) => {
+                    const pct = Math.min(c.total, 100);
+
+                    return (
+                      <div
+                        key={c.label}
+                        style={{
+                          background: "#080e1c",
+                          border: `1px solid ${c.color}40`,
+                          borderRadius: 10,
+                          padding: "12px 12px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#aebacd",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            fontWeight: 700,
+                            marginBottom: 8,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: "50%",
+                              background: c.color,
+                              display: "inline-block",
+                            }}
+                          />
+                          {c.label}
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: 20,
+                            color: c.color,
+                            fontFamily: "'DM Mono', monospace",
+                            fontWeight: 800,
+                            marginBottom: 6,
+                          }}
+                        >
+                          {fmt(c.total, 0)}%
+                        </div>
+
+                        <div className="pbar" style={{ marginBottom: 8 }}>
+                          <div
+                            className="pfill"
+                            style={{
+                              width: `${pct}%`,
+                              background: c.color,
+                            }}
+                          />
+                        </div>
+
+                        <div
+                          style={{
+                            color: "#4b607b",
+                            fontSize: 10,
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {c.subtitle}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -3172,7 +3480,7 @@ export default function App() {
                   </div>
                 </div>
                 <button
-                  onClick={handleSave}
+                  onClick={saveProgressTargets}
                   disabled={loading}
                   style={{
                     background: saved ? "#06261a" : "#0d1f3a",
@@ -3309,6 +3617,255 @@ export default function App() {
               </div>
             </div>
 
+            <div className={card} style={{ padding: isMobile ? 16 : 22 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: isMobile ? "flex-start" : "center",
+                  gap: 12,
+                  flexDirection: isMobile ? "column" : "row",
+                  marginBottom: 14,
+                }}
+              >
+                <div>
+                  <div style={{ ...ST, marginBottom: 4 }}>
+                    Decision Quality
+                  </div>
+                  <div
+                    style={{ fontSize: 11, color: "#64748b", lineHeight: 1.45 }}
+                  >
+                    Average decision quality from Decision Log. This stays
+                    readable even when you have hundreds of records.
+                  </div>
+                </div>
+              </div>
+
+              {decisionTrendData.length === 0 ? (
+                <div
+                  style={{
+                    background: "#080e1c",
+                    borderRadius: 12,
+                    padding: "26px 20px",
+                    textAlign: "center",
+                    border: "1px dashed #1a2540",
+                    color: "#5f728a",
+                    fontSize: 13,
+                  }}
+                >
+                  No decision log data yet
+                </div>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: isMobile
+                        ? "1fr"
+                        : "repeat(4,1fr)",
+                      gap: 12,
+                      marginBottom: 14,
+                    }}
+                  >
+                    {[
+                      {
+                        label: "Avg Score",
+                        value: fmt(averageDecisionScore, 2),
+                        color: "#a78bfa",
+                        sub: "Good = 3 / Neutral = 1 / Bad = 0",
+                      },
+                      {
+                        label: "Avg Outcome",
+                        value: `${averageOutcomePercent > 0 ? "+" : ""}${fmt(
+                          averageOutcomePercent,
+                          2
+                        )}%`,
+                        color:
+                          averageOutcomePercent > 0
+                            ? "#34d399"
+                            : averageOutcomePercent < 0
+                            ? "#f87171"
+                            : "#f59e0b",
+                        sub: "Average outcome after decision",
+                      },
+                      {
+                        label: "Follow System Rate",
+                        value: `${fmt(followSystemRate, 2)}%`,
+                        color: "#60a5fa",
+                        sub: `${followSystemCount} of ${decisionCount} decisions`,
+                      },
+                      {
+                        label: "Decision Count",
+                        value: decisionCount.toLocaleString(),
+                        color: "#f59e0b",
+                        sub: "Total logged decisions",
+                      },
+                    ].map((m) => (
+                      <div
+                        key={m.label}
+                        style={{
+                          background: "#080e1c",
+                          border: "1px solid #1a2540",
+                          borderRadius: 12,
+                          padding: "12px 14px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: "#64748b",
+                            marginBottom: 5,
+                            fontWeight: 800,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          {m.label}
+                        </div>
+                        <div
+                          style={{
+                            color: m.color,
+                            fontFamily: "'DM Mono', monospace",
+                            fontWeight: 800,
+                            fontSize: 20,
+                            marginBottom: 5,
+                          }}
+                        >
+                          {m.value}
+                        </div>
+                        <div
+                          style={{
+                            color: "#4b607b",
+                            fontSize: 10,
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {m.sub}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr",
+                      gap: 14,
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: "#080e1c",
+                        border: "1px solid #1a2540",
+                        borderRadius: 12,
+                        padding: "16px 14px",
+                      }}
+                    >
+                      <div style={ST}>Behavior Radar — Avg Score</div>
+                      <ResponsiveContainer
+                        width="100%"
+                        height={isMobile ? 240 : 270}
+                      >
+                        <RadarChart data={decisionRadarData}>
+                          <PolarGrid stroke="#1a2540" />
+                          <PolarAngleAxis
+                            dataKey="reason"
+                            tick={{ fill: "#7d8ea5", fontSize: 10 }}
+                          />
+                          <YAxis domain={[0, 3]} hide />
+                          <Radar
+                            name="Full Score"
+                            dataKey="fullScore"
+                            stroke="#334155"
+                            fill="#334155"
+                            fillOpacity={0.08}
+                            strokeOpacity={0.35}
+                            strokeWidth={1}
+                          />
+                          <Radar
+                            name="Avg Score"
+                            dataKey="avgScore"
+                            stroke="#a78bfa"
+                            fill="#a78bfa"
+                            fillOpacity={0.28}
+                            strokeWidth={2}
+                          />
+                          <RechartsTooltip
+                            contentStyle={{
+                              background: "#0d1526",
+                              border: "1px solid #1a2540",
+                              borderRadius: 8,
+                            }}
+                          />
+                          <Legend
+                            wrapperStyle={{
+                              fontSize: 11,
+                              color: "#7d8ea5",
+                            }}
+                          />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div
+                      style={{
+                        background: "#080e1c",
+                        border: "1px solid #1a2540",
+                        borderRadius: 12,
+                        padding: "16px 14px",
+                      }}
+                    >
+                      <div style={ST}>Decision Status</div>
+                      <ResponsiveContainer
+                        width="100%"
+                        height={isMobile ? 220 : 250}
+                      >
+                        <PieChart>
+                          <Pie
+                            data={decisionStatusData}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={isMobile ? 34 : 46}
+                            outerRadius={isMobile ? 68 : 82}
+                            paddingAngle={4}
+                          >
+                            {decisionStatusData.map((d, i) => (
+                              <Cell
+                                key={i}
+                                fill={
+                                  String(d.rawStatus || "").includes("Good")
+                                    ? "#34d399"
+                                    : String(d.rawStatus || "").includes("Bad")
+                                    ? "#f87171"
+                                    : "#f59e0b"
+                                }
+                              />
+                            ))}
+                          </Pie>
+                          <RechartsTooltip
+                            contentStyle={{
+                              background: "#0d1526",
+                              border: "1px solid #1a2540",
+                              borderRadius: 8,
+                            }}
+                          />
+                          <Legend
+                            wrapperStyle={{
+                              fontSize: 11,
+                              color: "#7d8ea5",
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                  </div>
+                </>
+              )}
+            </div>
+
             <div
               style={{
                 display: "grid",
@@ -3338,7 +3895,7 @@ export default function App() {
                       tickFormatter={(v) => `฿${fmtB(v)}`}
                       width={55}
                     />
-                    <Tooltip content={<CTip />} />
+                    <RechartsTooltip content={<CTip />} />
                     <Legend
                       wrapperStyle={{
                         fontSize: 11,
@@ -3387,7 +3944,7 @@ export default function App() {
                       fillOpacity={0.25}
                       strokeWidth={2}
                     />
-                    <Tooltip
+                    <RechartsTooltip
                       contentStyle={{
                         background: "#0d1526",
                         border: "1px solid #1a2540",
@@ -3404,3 +3961,4 @@ export default function App() {
     </div>
   );
 }
+export default App;
