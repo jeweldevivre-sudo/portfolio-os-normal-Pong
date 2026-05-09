@@ -273,6 +273,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
     action: "BUY",
     units: "",
     price: "",
+    marketPrice: "",
   });
 
   const [orderEdits, setOrderEdits] = useState({});
@@ -698,9 +699,10 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
         .toUpperCase();
       const units = num(manualOverrideForm.units);
       const price = num(manualOverrideForm.price);
+      const marketPrice = num(manualOverrideForm.marketPrice || manualOverrideForm.price);
 
-      if (!assetCode || !actionType || units <= 0 || price <= 0) {
-        alert("Please fill Asset Code, Action, Units, and Price.");
+      if (!assetCode || !actionType || units <= 0 || price <= 0 || marketPrice <= 0) {
+        alert("Please fill Asset Code, Action, Units, Actual Price, and Market Price.");
         return;
       }
 
@@ -720,10 +722,10 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
           suggestedUnits: 0,
           actualUnits: units,
           units,
-          suggestedPrice: price,
+          suggestedPrice: marketPrice,
           actualPrice: price,
           buySellPrice: price,
-          marketPrice: price,
+          marketPrice,
           note: "OFF_SYSTEM",
         }),
       });
@@ -741,6 +743,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
         action: "BUY",
         units: "",
         price: "",
+        marketPrice: "",
       });
 
       await loadPortfolioFromSheet();
@@ -2944,7 +2947,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: isMobile ? "1fr" : "1fr 0.8fr 0.8fr 0.8fr",
+                  gridTemplateColumns: isMobile ? "1fr" : "1fr 0.7fr 0.7fr 0.8fr 0.8fr",
                   gap: 12,
                 }}
               >
@@ -3033,13 +3036,14 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 </div>
 
                 <div>
-                  <div style={ST}>Price</div>
+                  <div style={ST}>Actual Price</div>
                   <input
                     value={manualOverrideForm.price}
                     onChange={(e) =>
                       setManualOverrideForm((p) => ({
                         ...p,
                         price: e.target.value,
+                        marketPrice: p.marketPrice || e.target.value,
                       }))
                     }
                     placeholder="0.00"
@@ -3050,6 +3054,33 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                       border: "1px solid #1d2a3d",
                       borderRadius: 10,
                       color: "#f59e0b",
+                      fontSize: 14,
+                      fontFamily: "'DM Mono', monospace",
+                      padding: "10px 12px",
+                      outline: "none",
+                      fontWeight: 800,
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <div style={ST}>Market Price</div>
+                  <input
+                    value={manualOverrideForm.marketPrice}
+                    onChange={(e) =>
+                      setManualOverrideForm((p) => ({
+                        ...p,
+                        marketPrice: e.target.value,
+                      }))
+                    }
+                    placeholder="0.00"
+                    type="number"
+                    style={{
+                      width: "100%",
+                      background: "#0d1526",
+                      border: "1px solid #1d2a3d",
+                      borderRadius: 10,
+                      color: "#93c5fd",
                       fontSize: 14,
                       fontFamily: "'DM Mono', monospace",
                       padding: "10px 12px",
