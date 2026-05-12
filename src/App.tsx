@@ -21,7 +21,7 @@ import {
 } from "recharts";
 
 const SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbxAMbgKDx1jD5vMT094z9YPcgnI5GFlsN4RuVkHyNl1qQ6nyOLnTQqV-cdUftT-J9D-/exec";
+  "https://script.google.com/macros/s/AKfycbwVpNdKefj1cZfsYuYyZG-uQq9ZmdMe9I935d80Y7PHLu1axxHqfozYQEmKJ-aOlXtgvg/exec";
 
 const DEFAULT_TARGETS = {
   totalWealth: 5000000,
@@ -52,6 +52,8 @@ const DECISION_NOTE_OPTIONS = [
   "Follow System",
   "Add on Dip",
   "Reduce Risk",
+  "Manual Override",
+  "Off-System",
 ];
 
 const normalizeHoldingType = (...values: any[]) => {
@@ -103,14 +105,12 @@ const fmtB = (n: any) =>
 
 const num = (v: any) => parseFloat(String(v).replace(/,/g, "")) || 0;
 
-const targetPct = (v: any) => {
-  const n = num(v);
-  if (!n) return 0;
-  return n <= 1 ? n * 100 : n;
-};
+// Target % uses direct percentage input.
+// Example: user types 10 = 10%, not 0.10 = 10%.
+const targetPct = (v: any) => num(v);
 
 const fmtPct = (v: any, d: number = 0) => {
-  const pct = targetPct(v);
+  const pct = num(v);
   return pct > 0 ? `${fmt(pct, d)}%` : "—";
 };
 
@@ -215,7 +215,7 @@ function CTip(props: any) {
 
 function App() {
   const [tab, setTab] = useState("dashboard");
-  const [phase, setPhase] = useState("Build");
+  const [phase, setPhase] = useState("Advance");
   const [holdings, setHoldings] = useState(
     Array(18)
       .fill(null)
@@ -244,7 +244,7 @@ function App() {
     lineAvailable: 0,
     maxBudget: 0,
     effectiveBudget: 0,
-    phase: "BUILD",
+    phase: "Advance",
     totalBuyNeed: 0,
     growthSell: 0,
     remainingNeed: 0,
@@ -261,10 +261,11 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
   const [decisionSaved, setDecisionSaved] = useState(false);
   const [decisionForm, setDecisionForm] = useState({
     assetCode: "",
-    action: "BUY",
+    systemSuggest: "BUY",
+    systemPrice: "",
     units: "",
-    price: "",
-    marketPrice: "",
+    youDid: "BUY",
+    buySellPrice: "",
   });
 
   const [orderEdits, setOrderEdits] = useState({});
@@ -313,12 +314,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
         apiSummary.cash ??
         0;
 
-      const portfolioPhase =
-        apiSummary.phase ||
-        apiSummary.portfolioPhase ||
-        apiSummary.portfolio_phase ||
-        apiPhaseControl.portfolioPhase ||
-        "Build";
+      const portfolioPhase = "Advance";
 
       setSummary({
         ...apiSummary,
@@ -337,47 +333,9 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
       });
 
       setCash(num(lineAvailable));
-      setMaxBudget(num(apiSummary.maxBudget ?? apiSummary.max_budget ?? 5000));
+      setMaxBudget(0);
 
-      const rawPhase = String(portfolioPhase).trim().toUpperCase();
-
-      const phaseMap = {
-        BUILD: "Build",
-        ACCUMULATE: "Accumulate",
-        INCOMEFOCUS: "Income",
-        "INCOME FOCUS": "Income",
-        INCOME: "Income",
-      };
-      setPhase((phaseMap as any)[rawPhase] || portfolioPhase || "Build");
-
-      if (Array.isArray(apiPhaseControl.phases)) {
-        const nextPhases = { ...DEFAULT_PHASES };
-        apiPhaseControl.phases.forEach((p: any) => {
-          const name = String(p.phase || "").trim();
-          if (!name) return;
-          const dividendPct =
-            num(p.dividend) <= 1 ? num(p.dividend) * 100 : num(p.dividend);
-          const growthPct =
-            num(p.growth) <= 1 ? num(p.growth) * 100 : num(p.growth);
-          const phaseKeyMap = {
-            BUILD: "Build",
-            ACCUMULATE: "Accumulate",
-            INCOME: "Income",
-            INCOMEFOCUS: "Income",
-            "INCOME FOCUS": "Income",
-          };
-          const key =
-  (phaseKeyMap as any)[name.toUpperCase().replace(/\s+/g, " ")] || name;
-
-(nextPhases as any)[key] = {
-  ...((nextPhases as any)[key] || {}),
-  dividendPct,
-  growthPct,
-  monthlyGrowth: (nextPhases as any)[key]?.monthlyGrowth || 15000,
-};
-        });
-        setPhases(nextPhases);
-      }
+      setPhase("Advance");
 
       if (data.targets) {
         setTargets((prev) => ({
@@ -532,12 +490,48 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
   const totalCost = computed.reduce((s, h) => s + h.cost, 0);
   const totalGLPct = totalCost > 0 ? (totalGL / totalCost) * 100 : 0;
 
-  const phaseData = phases[phase] || phases.Build;
+  const advanceTargetWeightTotals = useMemo(() => {
+    const totals = { Dividend: 0, Growth: 0 };
+    holdings.forEach((h) => {
+      const type = normalizeHoldingType(h.type);
+      const weight = targetPct(h.targetWeight);
+      if (type === "Dividend") totals.Dividend += weight;
+      if (type === "Growth") totals.Growth += weight;
+    });
+    return totals;
+  }, [holdings]);
+
+  const phaseData = {
+    dividendPct: advanceTargetWeightTotals.Dividend,
+    growthPct: advanceTargetWeightTotals.Growth,
+  };
   const divPct = equityValue > 0 ? (divValue / equityValue) * 100 : 0;
   const growPct = equityValue > 0 ? (growValue / equityValue) * 100 : 0;
   const divGap = divPct - phaseData.dividendPct;
   const growGap = growPct - phaseData.growthPct;
-  const needRebal = Math.abs(divGap) > 5;
+  const needRebal = Math.abs(divGap) > 5 || Math.abs(growGap) > 5;
+
+  const allocationMessage = useMemo(() => {
+    if (!needRebal) return "Portfolio aligned";
+
+    if (growGap > 5) {
+      return `Growth overweight +${fmt(Math.abs(growGap))}%`;
+    }
+
+    if (divGap > 5) {
+      return `Dividend overweight +${fmt(Math.abs(divGap))}%`;
+    }
+
+    if (divGap < -5) {
+      return `Dividend lowerweight -${fmt(Math.abs(divGap))}%`;
+    }
+
+    if (growGap < -5) {
+      return `Growth lowerweight -${fmt(Math.abs(growGap))}%`;
+    }
+
+    return "Review allocation";
+  }, [needRebal, growGap, divGap]);
 
   const totalBuyCash = num(
     summary.totalBuyNeed ?? summary.total_buy_need ?? summary.buyNeed
@@ -676,7 +670,6 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
         },
         body: JSON.stringify({
           action: "logDecision",
-          source: "SYSTEM",
           actionType,
           assetCode,
           youDid: actionType,
@@ -714,21 +707,25 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
       const assetCode = String(decisionForm.assetCode || "")
         .trim()
         .toUpperCase();
-      const actionType = String(decisionForm.action || "")
+      const systemSuggest = String(decisionForm.systemSuggest || "")
+        .trim()
+        .toUpperCase();
+      const youDid = String(decisionForm.youDid || "")
         .trim()
         .toUpperCase();
       const units = num(decisionForm.units);
-      const price = num(decisionForm.price);
-      const marketPrice = num(decisionForm.marketPrice || decisionForm.price);
+      const systemPrice = num(decisionForm.systemPrice);
+      const buySellPrice = num(decisionForm.buySellPrice);
 
       if (
         !assetCode ||
-        !actionType ||
+        !systemSuggest ||
+        !youDid ||
         units <= 0 ||
-        price <= 0
+        buySellPrice <= 0
       ) {
         alert(
-          "Please fill Asset Code, Action, Units, and Price."
+          "Please fill Asset Code, System Suggest, Units, You Did, and Buy/Sell Price."
         );
         return;
       }
@@ -743,19 +740,16 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
         },
         body: JSON.stringify({
           action: "logDecision",
-          source: "MANUAL_OVERRIDE",
-          actionType,
           assetCode,
-          suggestedPrice: marketPrice,
-          systemPrice: marketPrice,
-          suggestedUnits: 0,
+          systemSuggest,
+          suggestedPrice: systemPrice || buySellPrice,
+          systemPrice: systemPrice || buySellPrice,
+          suggestedUnits: units,
           actualUnits: units,
-          actualPrice: price,
-          marketPrice,
+          actualPrice: buySellPrice,
           units,
-          youDid: actionType,
-          buySellPrice: price,
-          note: "OFF_SYSTEM",
+          youDid,
+          buySellPrice,
         }),
       });
 
@@ -770,10 +764,11 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
 
       setDecisionForm({
         assetCode: "",
-        action: "BUY",
+        systemSuggest: "BUY",
+        systemPrice: "",
         units: "",
-        price: "",
-        marketPrice: "",
+        youDid: "BUY",
+        buySellPrice: "",
       });
 
       await loadPortfolioFromSheet();
@@ -794,25 +789,21 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
       const settingsPayload = {
         action: "saveSettings",
         portfolioName: portfolioName,
-        portfolioPhase: phase,
         lineAvailable: Number(cash) || 0,
-        maxBudget: Number(maxBudget) || 0,
         targets: {
           totalWealth: num(targets.totalWealth),
           dividendValue: num(targets.dividendValue),
           growthValue: num(targets.growthValue),
         },
-        phaseControl: Object.entries(phases).map(([phaseName, values]) => ({
-          phase: phaseName,
-          dividend: (Number(values.dividendPct) || 0) / 100,
-          growth: (Number(values.growthPct) || 0) / 100,
-        })),
       };
 
       const portfolioPayload = {
         action: "savePortfolio",
         portfolio: holdings
-          .filter((h) => String(h.symbol || "").trim())
+          .filter((h) => {
+            const symbol = String(h.symbol || "").trim().toUpperCase();
+            return symbol && symbol !== "SYMBOL";
+          })
           .map((h) => ({
             assetCode: String(h.symbol || "")
               .trim()
@@ -822,6 +813,8 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
             osType: normalizeHoldingType(h.type),
             units: h.units === "" ? "" : Number(h.units),
             avgCost: h.avgCost === "" ? "" : Number(h.avgCost),
+            targetWeight: h.targetWeight === "" ? "" : num(h.targetWeight),
+            note: h.note || "",
           })),
       };
 
@@ -913,9 +906,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
       const payload = {
         action: "saveSettings",
         portfolioName: portfolioName,
-        portfolioPhase: phase,
         lineAvailable: Number(cash) || 0,
-        maxBudget: Number(maxBudget) || 0,
 
         // Keep original nested structure
         targets: progressTargets,
@@ -995,27 +986,20 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
     { name: "Growth", value: growValue },
   ];
 
-  const targetWeightTotals = useMemo(() => {
-    const currentPhaseData = phases[phase] ||
-      phases.Build || { dividendPct: 40, growthPct: 60 };
-    return {
-      Dividend: Number(currentPhaseData.dividendPct) || 0,
-      Growth: Number(currentPhaseData.growthPct) || 0,
-    };
-  }, [phases, phase]);
+  const targetWeightTotals = advanceTargetWeightTotals;
 
   const targetCoverageCards = [
     {
       label: "Dividend Target Weight",
       total: targetWeightTotals.Dividend,
       color: "#34d399",
-      subtitle: "From MASTER TARGET phase allocation",
+      subtitle: "From your portfolio target",
     },
     {
       label: "Growth Target Weight",
       total: targetWeightTotals.Growth,
       color: "#60a5fa",
-      subtitle: "From MASTER TARGET phase allocation",
+      subtitle: "From your portfolio target",
     },
   ];
 
@@ -1365,28 +1349,19 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                   fontWeight: 700,
                 }}
               >
-                Phase
+                Service
               </span>
             )}
-            <select
-              value={phase}
-              onChange={(e) => savePortfolioPhase(e.target.value)}
+            <span
               style={{
-                background: "transparent",
-                border: "none",
                 color: "#60a5fa",
                 fontSize: isMobile ? 12 : 13,
                 fontWeight: 700,
                 fontFamily: "'Inter', sans-serif",
-                outline: "none",
-                cursor: "pointer",
-                maxWidth: isMobile ? 92 : "none",
               }}
             >
-              <option value="Build">🏗️ Build</option>
-              <option value="Accumulate">📦 Accumulate</option>
-              <option value="Income">💰 Income</option>
-            </select>
+              Advance
+            </span>
           </div>
           {!isMobile && (
             <>
@@ -1475,12 +1450,12 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                   <span
                     style={{ fontWeight: 800, color: "#fca5a5", fontSize: 13 }}
                   >
-                    Rebalance Needed
+                    Review Allocation
                   </span>
                 </div>
                 <span style={{ color: "#7d8ea5", fontSize: 12 }}>
-                  Dividend overweight +{fmt(Math.abs(divGap))}% · Target D:
-                  {phaseData.dividendPct}% / G:{phaseData.growthPct}%
+                  {allocationMessage} · Target D:{phaseData.dividendPct}% / G:
+                  {phaseData.growthPct}%
                 </span>
               </div>
             ) : (
@@ -1498,12 +1473,12 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                   <span
                     style={{ fontWeight: 800, color: "#4ade80", fontSize: 13 }}
                   >
-                    Portfolio Balanced
+                    Portfolio Aligned
                   </span>
                   <span
                     style={{ color: "#7d8ea5", fontSize: 12, marginLeft: 8 }}
                   >
-                    Phase: {phase}
+                    Advance Mode
                   </span>
                 </div>
               )
@@ -1617,7 +1592,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
               }}
             >
               <div className={card} style={{ padding: isMobile ? 16 : 22 }}>
-                <div style={ST}>Portfolio Allocation — Phase: {phase}</div>
+                <div style={ST}>Portfolio Allocation — Advance Mode</div>
                 <div
                   style={{
                     display: "flex",
@@ -2460,7 +2435,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                     <div
                       style={{ fontSize: 11, color: "#334155", marginTop: 4 }}
                     >
-                      Current phase: {phase}
+                      Advance Mode
                     </div>
                   </div>
                 ) : (
@@ -2861,203 +2836,6 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 })}
               </div>
             </div>
-
-            <div
-              className={card}
-              style={{
-                padding: isMobile ? 16 : 22,
-                gridColumn: "1 / -1",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: isMobile ? "flex-start" : "center",
-                  flexDirection: isMobile ? "column" : "row",
-                  gap: 10,
-                  marginBottom: 16,
-                }}
-              >
-                <div style={{ ...ST, marginBottom: 0 }}>Manual Override</div>
-                <span
-                  className="pill"
-                  style={{
-                    background: "#2a1f0a",
-                    border: "1px solid #7c5c12",
-                    color: "#fbbf24",
-                  }}
-                >
-                  OFF_SYSTEM
-                </span>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: isMobile ? "1fr" : "1fr 0.8fr 0.8fr 0.8fr 0.8fr",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <div style={ST}>Asset Code</div>
-                  <input
-                    value={decisionForm.assetCode}
-                    onChange={(e) =>
-                      setDecisionForm((p) => ({
-                        ...p,
-                        assetCode: e.target.value.toUpperCase(),
-                      }))
-                    }
-                    placeholder="e.g. SPALI"
-                    style={{
-                      width: "100%",
-                      background: "#0d1526",
-                      border: "1px solid #1d2a3d",
-                      borderRadius: 10,
-                      color: "#e2e8f0",
-                      fontSize: 14,
-                      fontFamily: "'DM Mono', monospace",
-                      padding: "10px 12px",
-                      outline: "none",
-                      fontWeight: 700,
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <div style={ST}>Action</div>
-                  <select
-                    value={decisionForm.action}
-                    onChange={(e) =>
-                      setDecisionForm((p) => ({
-                        ...p,
-                        action: e.target.value,
-                      }))
-                    }
-                    style={{
-                      width: "100%",
-                      background: "#0d1526",
-                      border: "1px solid #1d2a3d",
-                      borderRadius: 10,
-                      color:
-                        decisionForm.action === "SELL" ? "#f87171" : "#34d399",
-                      fontSize: 14,
-                      fontFamily: "'DM Mono', monospace",
-                      padding: "10px 12px",
-                      outline: "none",
-                      fontWeight: 800,
-                    }}
-                  >
-                    <option value="BUY">BUY</option>
-                    <option value="SELL">SELL</option>
-                  </select>
-                </div>
-
-                <div>
-                  <div style={ST}>Units</div>
-                  <input
-                    value={decisionForm.units}
-                    onChange={(e) =>
-                      setDecisionForm((p) => ({ ...p, units: e.target.value }))
-                    }
-                    placeholder="0"
-                    type="number"
-                    style={{
-                      width: "100%",
-                      background: "#0d1526",
-                      border: "1px solid #1d2a3d",
-                      borderRadius: 10,
-                      color: "#e2e8f0",
-                      fontSize: 14,
-                      fontFamily: "'DM Mono', monospace",
-                      padding: "10px 12px",
-                      outline: "none",
-                      fontWeight: 700,
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <div style={ST}>Price</div>
-                  <input
-                    value={decisionForm.price}
-                    onChange={(e) =>
-                      setDecisionForm((p) => ({
-                        ...p,
-                        price: e.target.value,
-                        marketPrice: p.marketPrice || e.target.value,
-                      }))
-                    }
-                    placeholder="0.00"
-                    type="number"
-                    style={{
-                      width: "100%",
-                      background: "#0d1526",
-                      border: "1px solid #1d2a3d",
-                      borderRadius: 10,
-                      color: "#f59e0b",
-                      fontSize: 14,
-                      fontFamily: "'DM Mono', monospace",
-                      padding: "10px 12px",
-                      outline: "none",
-                      fontWeight: 800,
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <div style={ST}>Market Price</div>
-                  <input
-                    value={decisionForm.marketPrice}
-                    onChange={(e) =>
-                      setDecisionForm((p) => ({
-                        ...p,
-                        marketPrice: e.target.value,
-                      }))
-                    }
-                    placeholder={decisionForm.price || "0.00"}
-                    type="number"
-                    style={{
-                      width: "100%",
-                      background: "#0d1526",
-                      border: "1px solid #1d2a3d",
-                      borderRadius: 10,
-                      color: "#93c5fd",
-                      fontSize: 14,
-                      fontFamily: "'DM Mono', monospace",
-                      padding: "10px 12px",
-                      outline: "none",
-                      fontWeight: 800,
-                    }}
-                  />
-                </div>
-              </div>
-
-              <button
-                onClick={saveDecisionRecord}
-                style={{
-                  marginTop: 16,
-                  background: decisionSaved
-                    ? "#06261a"
-                    : "linear-gradient(135deg,#1d4ed8,#2563eb)",
-                  border: `1px solid ${decisionSaved ? "#0d5a3d" : "#3b82f6"}`,
-                  color: decisionSaved ? "#4ade80" : "#fff",
-                  borderRadius: 12,
-                  padding: "14px 18px",
-                  fontSize: 14,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  fontFamily: "'Inter', sans-serif",
-                  boxShadow: decisionSaved
-                    ? "none"
-                    : "0 10px 24px rgba(37,99,235,.22)",
-                  width: "100%",
-                }}
-              >
-                {decisionSaved ? "Recorded" : "Save to Decision Log"}
-              </button>
-            </div>
           </div>
         )}
 
@@ -3070,27 +2848,17 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
             }}
           >
             <div className={card} style={{ padding: isMobile ? 16 : 22 }}>
+              <div style={ST}>Buy / Sell Record</div>
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: isMobile ? "flex-start" : "center",
-                  flexDirection: isMobile ? "column" : "row",
-                  gap: 10,
+                  color: "#7d8ea5",
+                  fontSize: 12,
+                  lineHeight: 1.6,
                   marginBottom: 16,
                 }}
               >
-                <div style={{ ...ST, marginBottom: 0 }}>Manual Override</div>
-                <span
-                  className="pill"
-                  style={{
-                    background: "#2a1f0a",
-                    border: "1px solid #7c5c12",
-                    color: "#fbbf24",
-                  }}
-                >
-                  OFF_SYSTEM
-                </span>
+                Record the actual trade after you execute it in your broker app.
+                This will update DECISION LOG and activate Anti-Flip protection.
               </div>
 
               <div
@@ -3127,13 +2895,13 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 </div>
 
                 <div>
-                  <div style={ST}>Action</div>
+                  <div style={ST}>System Suggest</div>
                   <select
-                    value={decisionForm.action}
+                    value={decisionForm.systemSuggest}
                     onChange={(e) =>
                       setDecisionForm((p) => ({
                         ...p,
-                        action: e.target.value,
+                        systemSuggest: e.target.value,
                       }))
                     }
                     style={{
@@ -3141,18 +2909,44 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                       background: "#0d1526",
                       border: "1px solid #1d2a3d",
                       borderRadius: 10,
-                      color:
-                        decisionForm.action === "SELL" ? "#f87171" : "#34d399",
+                      color: "#e2e8f0",
                       fontSize: 14,
                       fontFamily: "'DM Mono', monospace",
                       padding: "10px 12px",
                       outline: "none",
-                      fontWeight: 800,
+                      fontWeight: 700,
                     }}
                   >
                     <option value="BUY">BUY</option>
                     <option value="SELL">SELL</option>
+                    <option value="HOLD">HOLD</option>
                   </select>
+                </div>
+
+                <div>
+                  <div style={ST}>System Price</div>
+                  <input
+                    value={decisionForm.systemPrice}
+                    onChange={(e) =>
+                      setDecisionForm((p) => ({
+                        ...p,
+                        systemPrice: e.target.value,
+                      }))
+                    }
+                    placeholder="0.00"
+                    type="number"
+                    style={{
+                      width: "100%",
+                      background: "#0d1526",
+                      border: "1px solid #1d2a3d",
+                      borderRadius: 10,
+                      color: "#aebacd",
+                      fontSize: 14,
+                      fontFamily: "'DM Mono', monospace",
+                      padding: "10px 12px",
+                      outline: "none",
+                    }}
+                  />
                 </div>
 
                 <div>
@@ -3180,14 +2974,44 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 </div>
 
                 <div>
-                  <div style={ST}>Price</div>
+                  <div style={ST}>You Did</div>
+                  <select
+                    value={decisionForm.youDid}
+                    onChange={(e) =>
+                      setDecisionForm((p) => ({ ...p, youDid: e.target.value }))
+                    }
+                    style={{
+                      width: "100%",
+                      background: "#0d1526",
+                      border: "1px solid #1d2a3d",
+                      borderRadius: 10,
+                      color:
+                        decisionForm.youDid === "SELL"
+                          ? "#f87171"
+                          : decisionForm.youDid === "BUY"
+                          ? "#34d399"
+                          : "#aebacd",
+                      fontSize: 14,
+                      fontFamily: "'DM Mono', monospace",
+                      padding: "10px 12px",
+                      outline: "none",
+                      fontWeight: 800,
+                    }}
+                  >
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                    <option value="HOLD">HOLD</option>
+                  </select>
+                </div>
+
+                <div>
+                  <div style={ST}>Buy / Sell Price</div>
                   <input
-                    value={decisionForm.price}
+                    value={decisionForm.buySellPrice}
                     onChange={(e) =>
                       setDecisionForm((p) => ({
                         ...p,
-                        price: e.target.value,
-                        marketPrice: p.marketPrice || e.target.value,
+                        buySellPrice: e.target.value,
                       }))
                     }
                     placeholder="0.00"
@@ -3198,33 +3022,6 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                       border: "1px solid #1d2a3d",
                       borderRadius: 10,
                       color: "#f59e0b",
-                      fontSize: 14,
-                      fontFamily: "'DM Mono', monospace",
-                      padding: "10px 12px",
-                      outline: "none",
-                      fontWeight: 800,
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <div style={ST}>Market Price</div>
-                  <input
-                    value={decisionForm.marketPrice}
-                    onChange={(e) =>
-                      setDecisionForm((p) => ({
-                        ...p,
-                        marketPrice: e.target.value,
-                      }))
-                    }
-                    placeholder={decisionForm.price || "0.00"}
-                    type="number"
-                    style={{
-                      width: "100%",
-                      background: "#0d1526",
-                      border: "1px solid #1d2a3d",
-                      borderRadius: 10,
-                      color: "#93c5fd",
                       fontSize: 14,
                       fontFamily: "'DM Mono', monospace",
                       padding: "10px 12px",
@@ -3256,7 +3053,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                   width: "100%",
                 }}
               >
-                {decisionSaved ? "Recorded" : "Save to Decision Log"}
+                {decisionSaved ? "✓ Recorded" : "Save Record"}
               </button>
             </div>
 
@@ -3470,7 +3267,7 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                             </td>
                             <td
                               style={{
-                                padding: "6px 10px",
+                                padding: "4px 5px",
                                 textAlign: "right",
                                 fontSize: 12,
                                 fontFamily: "'DM Mono', monospace",
@@ -3480,9 +3277,25 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                                     : "#64748b",
                                 fontWeight: 800,
                                 letterSpacing: "0.01em",
+                                whiteSpace: "nowrap",
                               }}
                             >
-                              {fmtPct(h.targetWeight, 0)}
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "flex-end",
+                                  gap: 5,
+                                }}
+                              >
+                                <EInput
+                                  val={h.targetWeight ?? ""}
+                                  onChange={(v) => updateHolding(i, "targetWeight", v)}
+                                  placeholder="0.00"
+                                  width="70px"
+                                />
+                                <span style={{ color: "#60a5fa", fontWeight: 800 }}>%</span>
+                              </span>
                             </td>
                             <td
                               style={{
@@ -3620,51 +3433,6 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 </div>
               </div>
 
-              <div style={IB}>
-                <div style={ST}>Max Buy Budget</div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "#7d8ea5",
-                    lineHeight: 1.5,
-                    marginBottom: 10,
-                  }}
-                >
-                  Set the maximum amount you're comfortable buying in this
-                  cycle. The engine will use the lower value between Line
-                  Available and Max Buy Budget.
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span style={{ fontSize: 13, color: "#7d8ea5" }}>฿</span>
-                  <input
-                    value={maxBudget}
-                    onChange={(e) => setMaxBudget(e.target.value)}
-                    type="number"
-                    style={{
-                      background: "#0d1526",
-                      border: "1px solid #1d2a3d",
-                      borderRadius: 10,
-                      color: "#f59e0b",
-                      fontSize: 16,
-                      fontFamily: "'DM Mono', monospace",
-                      padding: "9px 12px",
-                      outline: "none",
-                      width: isMobile ? "100%" : "220px",
-                      fontWeight: 800,
-                    }}
-                  />
-                  {!isMobile && (
-                    <span style={{ fontSize: 11, color: "#4b607b" }}>THB</span>
-                  )}
-                </div>
-              </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -3760,110 +3528,6 @@ const [deletedPortfolioSymbols, setDeletedPortfolioSymbols] = useState<string[]>
                 </div>
               </div>
 
-              <div style={IB}>
-                <div
-                  style={{
-                    fontWeight: 800,
-                    fontSize: 13,
-                    marginBottom: 14,
-                    color: "#e2e8f0",
-                  }}
-                >
-                  Phase Controls
-                </div>
-
-                {[
-                  { key: "Build", label: "🏗️ Build" },
-                  { key: "Accumulate", label: "📦 Accumulate" },
-                  { key: "Income", label: "💰 Income" },
-                ].map((p) => (
-                  <div
-                    key={p.key}
-                    style={{
-                      marginBottom: 10,
-                      background: phase === p.key ? "#0c1a2e" : "#080e1c",
-                      border: `1px solid ${
-                        phase === p.key ? "#234980" : "#1a2540"
-                      }`,
-                      borderRadius: 10,
-                      padding: "10px 12px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 700,
-                        color: phase === p.key ? "#8ec5ff" : "#aebacd",
-                        marginBottom: 8,
-                      }}
-                    >
-                      {p.label}
-                    </div>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-                        gap: 8,
-                      }}
-                    >
-                      {[
-                        {
-                          field: "dividendPct",
-                          label: "Div %",
-                          color: "#34d399",
-                        },
-                        {
-                          field: "growthPct",
-                          label: "Growth %",
-                          color: "#60a5fa",
-                        },
-                      ].map((f) => (
-                        <div key={f.field}>
-                          <div
-                            style={{
-                              fontSize: 9,
-                              color: "#64748b",
-                              marginBottom: 3,
-                              textTransform: "uppercase",
-                              letterSpacing: "0.08em",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {f.label}
-                          </div>
-                          <input
-                            value={phases[p.key][f.field]}
-                            type="number"
-                            onChange={(e) =>
-                              setPhases((prev) => ({
-                                ...prev,
-                                [p.key]: {
-                                  ...prev[p.key],
-                                  [f.field]:
-                                    num(e.target.value) || e.target.value,
-                                },
-                              }))
-                            }
-                            style={{
-                              width: "100%",
-                              background: "#0d1526",
-                              border: `1px solid ${f.color}40`,
-                              borderRadius: 8,
-                              color: f.color,
-                              fontSize: 13,
-                              fontFamily: "'DM Mono', monospace",
-                              padding: "6px 8px",
-                              outline: "none",
-                              fontWeight: 700,
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
 
               <button
                 onClick={handleSave}
